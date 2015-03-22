@@ -1,0 +1,110 @@
+---
+title: "Practical Machine Learning Project"
+author: "Hang Zhou"
+date: "Thursday, March 19, 2015"
+output: html_document
+---
+##Synopsis
+Recently Wearable technology becomes a hot topic, Human Activity Recongnition (HAR) is a big contributor to this new technology. With devices like Jawbone Up, Nike Fuelband and Fitbit's help, large amount of personal activity data can be collected with low cost. How to utilitize thise data in HAR becomes a new challenge. This project tries to do analysis on the data set that published by Groupware@LES, and eventually answer the question of "Can we predict how an activity being perfomed?". If the answer is Yes, how well we can predict it. 
+
+##Data Source
+The data used in this project is Weight Lifting Exercises Dataset downloaded from following research project: 
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+Read more:  http://groupware.les.inf.puc-rio.br/har
+
+##Introduction
+In this project I will start with data cleaning, remove unnecessary data, find out columns that really matter to the analysis. Then I will apply multiple prdiction methods to the data, compare the results, and eventually find out the best one for these data.
+
+##Load Data and Clean Data
+```{r}
+library(caret)
+library(rattle)
+library(rpart)
+library(rpart.plot)
+raw_train <- read.csv("pml-training.csv", na.strings=c("NA",""), header=TRUE)
+raw_test <- read.csv("pml-testing.csv", na.strings=c("NA",""), header=TRUE)
+```
+Noticed that there are lots of blank or NA fields, need some extra work to evaluate the quantity and how much that will impact our analysis. 
+```{r}
+fn_No_of_NonNA <- function(x) {as.vector(apply(x, 2, function(x) length(which(!is.na(x)))))}
+NoofNNA <- fn_No_of_NonNA(raw_train)
+CheckOne <- data.frame(names(raw_train), NoofNNA / nrow(raw_train))
+names(CheckOne) <- c("ColName", "Pct")
+head(CheckOne, 20)
+```
+The result in CheckOne shows that some columns have value for every record, while some columns only have value for less than 2.1% records. The exact same situation happens to the raw test data set as well. These columns with lots of NAs will be removed, to simplify the analysis. 
+
+```{r}
+CheckTwo <- CheckOne[which(CheckOne$Pct < 1), ]
+raw_train <- raw_train[, !(names(raw_train) %in% CheckTwo$ColName )]
+raw_test <- raw_test[, !(names(raw_test) %in% CheckTwo$ColName )]
+##head(raw_train)
+```
+The first several columns are only for recording and documentation purpose, do not really contribute to the analysis, so we will remove those columns from the dataset before analysis. 
+```{r}
+raw_train <- raw_train[, 8: length(names(raw_train))]
+raw_test <- raw_test[, 8: length(names(raw_test))]
+```
+Now the data is ready for us to perform further analysis.
+As suggested from the class, we separate 75% of the original training data for training purpose to generate the model. 
+```{r}
+set.seed(1234)
+inTrain <- createDataPartition(y = raw_train$classe, p = 0.75, list = FALSE)
+training <- raw_train[inTrain, ]
+testing <- raw_train[-inTrain, ]
+```
+
+##Classification Tree
+There is no evidence which prediction method is the best fit so far, so I will start with Classification Tree. 
+```{r}
+modFit <- train(training$classe ~ ., data = training, method = "rpart")
+print(modFit)
+print(modFit$finalModel)
+fancyRpartPlot(modFit$finalModel)
+```
+
+The accuracy of the final model that was pick is about 52.04%, that means the expected error could be up to 48%. 
+With this model, we will use it against ther small data set (25% of the original training data set) that sets aside to verify. 
+```{r}
+predict1 <- predict(modFit, testing)
+print(confusionMatrix(predict1, testing$classe))
+```
+The result shows that when testing with our small testing set, the accuracy dropped from 52.08% to 49.53%. The out of sample error is 50.47%.  
+Use this model to test again orginal 20 record test set. 
+```{r}
+predict2 <- predict(modFit, newdata = raw_test)
+print(predict2)
+```
+
+##Random Forest
+Considering the accuracy is fair low with Classification Tree, I will try with Random Forest again since one of the Pros of Random Forest is accuracy.
+```{r}
+#set.seed(1234)
+modFit1 <- train(training$classe ~ ., method="rf", trControl=trainControl(method = "cv", number = 4), data=training)
+print(modFit1)
+predict3 <- predict(modFit1, testing)
+print(confusionMatrix(predict3, testing$classe))
+```
+
+```{r}
+predict4 <- predict(modFit1, newdata = raw_test)
+print(predict4)
+```
+The accuracy of the model is about 99.13% with cross validation, when the model is applied to the small test data set, the accuracy increased to 99.33%, which means the out of smaple error is only about 0.67%. 
+
+## Conclusion
+Compare the accuracy from confusionMatrix of both prediction methods, Random Forest's 99.33% definitely is much higher than Classification Tree's 49.53%. So I will use Random Forest with its prediction. 
+
+Classification Tree's prediction is: 
+```{r}
+print(predict2)
+```
+Random Forest's prediction is: 
+```{r}
+print(predict4)
+```
+
+As class material mentioned, one of the Cons of Random Forest is Speed, indeed it took a really long time to train the model against with 75% of the training data set provided. There is another option that only use a small portion of that training data set instead of 75%, of course the time to spend on the training the model dropped, but the accuracy of the final result also dropped about 3-5%, depends on the data amount we used. If applied this calculation in some real-time processing, we might consider using less training data to make it faster, but for this project, I will choose to use the whole data that was provided. 
+
